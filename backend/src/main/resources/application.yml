@@ -1,0 +1,18 @@
+spring:
+  application:
+    name: ratemyuj
+  data:
+    mongodb:
+      uri: ${MONGODB_URI:mongodb://localhost:27017/ratemyuj}
+      auto-index-creation: true
+
+openrouter:
+  api-key: ${OPENROUTER_API_KEY}          # never commit this — env var only
+  base-url: https://openrouter.ai/api/v1
+  model: ${MODERATION_MODEL:openai/gpt-4o-mini}
+  fallback-model: ${MODERATION_FALLBACK_MODEL:meta-llama/llama-3.3-70b-instruct}
+  timeout-seconds: 12
+  escalate-below-confidence: 0.6
+
+app:
+  hash-pepper: ${HASH_PEPPER}             # server-side secret for HMAC(email)
