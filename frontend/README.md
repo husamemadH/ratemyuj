@@ -13,14 +13,19 @@ npm run dev
 
 ## Connecting to the real backend
 
-Replace the `mockSubmitReview` call and the hardcoded `PROFESSORS` /
-`COURSES` data with `fetch` calls to the endpoints documented inline,
-e.g.:
+The Vite dev server proxies `/api` to `http://localhost:8080`, so the
+session cookie is first-party. Sign-in (`/api/auth/request`, `/api/auth/verify`,
+`/api/auth/me`, `/api/auth/logout`) already uses that proxy.
+
+Professor search and review submission still use the in-file mock data.
+When those calls move to the API, send the cookie and do not set
+`X-Student-Hash`:
 
 ```js
 const res = await fetch("/api/reviews", {
   method: "POST",
-  headers: { "Content-Type": "application/json", Authorization": `Bearer ${token}` },
+  credentials: "include",
+  headers: { "Content-Type": "application/json" },
   body: JSON.stringify({ professorId, courseId, rating, comment, grade, difficulty, wouldTakeAgain }),
 }).then(r => r.json());
 ```

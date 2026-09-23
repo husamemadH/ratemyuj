@@ -1,5 +1,6 @@
 package com.ratemyuj.controller;
 
+import com.ratemyuj.auth.StudentPrincipal;
 import com.ratemyuj.domain.ReviewStatus;
 import com.ratemyuj.dto.CreateReviewRequest;
 import com.ratemyuj.dto.ReviewSubmissionResponse;
@@ -12,11 +13,19 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.context.annotation.Bean;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.MediaType;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
+import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 import java.util.List;
 
@@ -24,10 +33,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @WebMvcTest(ReviewController.class)
+@Import(ReviewControllerTest.PermitAllSecurity.class)
 class ReviewControllerTest {
 
     @Autowired private MockMvc mvc;
@@ -50,7 +61,7 @@ class ReviewControllerTest {
                             "rev-1", ReviewStatus.PUBLISHED, null, List.of()));
 
             mvc.perform(post("/api/reviews")
-                            .header("X-Student-Hash", "hash-abc")
+                            .with(asStudent("hash-abc"))
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(VALID_BODY))
                     .andExpect(status().isOk())
@@ -67,7 +78,7 @@ class ReviewControllerTest {
                             "Keep it about the teaching.", List.of("PERSONAL_ATTACK")));
 
             mvc.perform(post("/api/reviews")
-                            .header("X-Student-Hash", "hash-abc")
+                            .with(asStudent("hash-abc"))
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(VALID_BODY))
                     .andExpect(status().isOk())
@@ -83,7 +94,7 @@ class ReviewControllerTest {
                     "Lectures are clear and the exams match the sheets.", "meh");
 
             mvc.perform(post("/api/reviews")
-                            .header("X-Student-Hash", "hash-abc")
+                            .with(asStudent("hash-abc"))
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(body))
                     .andExpect(status().isBadRequest())
@@ -95,7 +106,7 @@ class ReviewControllerTest {
         @DisplayName("rating outside 1..5 is rejected")
         void ratingOutOfRange() throws Exception {
             mvc.perform(post("/api/reviews")
-                            .header("X-Student-Hash", "hash-abc")
+                            .with(asStudent("hash-abc"))
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(VALID_BODY.replace("\"rating\":5", "\"rating\":9")))
                     .andExpect(status().isBadRequest());
@@ -105,20 +116,11 @@ class ReviewControllerTest {
         @DisplayName("an unknown grade enum value is a 400, not a 500")
         void invalidEnumValue() throws Exception {
             mvc.perform(post("/api/reviews")
-                            .header("X-Student-Hash", "hash-abc")
+                            .with(asStudent("hash-abc"))
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(VALID_BODY.replace("\"grade\":\"A\"", "\"grade\":\"Z\"")))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.error").exists());
-        }
-
-        @Test
-        @DisplayName("missing student identity header is a 400")
-        void missingHeader() throws Exception {
-            mvc.perform(post("/api/reviews")
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .content(VALID_BODY))
-                    .andExpect(status().isBadRequest());
         }
 
         @Test
@@ -128,7 +130,7 @@ class ReviewControllerTest {
                     .thenThrow(ApiException.conflict("You have already reviewed this professor for this course"));
 
             mvc.perform(post("/api/reviews")
-                            .header("X-Student-Hash", "hash-abc")
+                            .with(asStudent("hash-abc"))
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(VALID_BODY))
                     .andExpect(status().isConflict())
@@ -158,7 +160,7 @@ class ReviewControllerTest {
         }
 
         @Test
-        @DisplayName("anonymous listing works — the identity header is optional here")
+        @DisplayName("anonymous listing works without a session")
         void anonymousListing() throws Exception {
             when(reviewService.publishedReviews(anyString(), anyString(), any(Pageable.class)))
                     .thenReturn(new PageImpl<>(List.of()));
@@ -177,10 +179,25 @@ class ReviewControllerTest {
         @DisplayName("owner delete returns 204 with no body")
         void ownerDelete() throws Exception {
             mvc.perform(delete("/api/reviews/rev-1")
-                            .header("X-Student-Hash", "hash-abc"))
+                            .with(asStudent("hash-abc")))
                     .andExpect(status().isNoContent());
 
             verify(reviewService).delete("rev-1", "hash-abc");
+        }
+    }
+
+    private static RequestPostProcessor asStudent(String hash) {
+        return authentication(new UsernamePasswordAuthenticationToken(
+                new StudentPrincipal(hash), null, List.of()));
+    }
+
+    @TestConfiguration
+    static class PermitAllSecurity {
+        @Bean
+        SecurityFilterChain testSecurityFilterChain(HttpSecurity http) throws Exception {
+            http.csrf(AbstractHttpConfigurer::disable)
+                    .authorizeHttpRequests(auth -> auth.anyRequest().permitAll());
+            return http.build();
         }
     }
 }

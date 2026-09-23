@@ -19,6 +19,6 @@ See each folder's own README for setup and run instructions.
 
 - ✅ Domain model, review submission flow, AI moderation pipeline, test suite
 - ✅ UI (mocked data — not yet wired to the live API)
-- ⬜ OTP + JWT auth (backend currently takes a dev placeholder header)
+- ✅ OTP + JWT auth (`@ju.edu.jo` email code, HttpOnly session cookie)
 - ⬜ Admin endpoints for the MANUAL_REVIEW queue
 - ⬜ Rate limiting on submissions

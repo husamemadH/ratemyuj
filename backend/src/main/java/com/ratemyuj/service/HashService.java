@@ -37,11 +37,21 @@ public class HashService {
         if (email == null || email.isBlank()) {
             throw new IllegalArgumentException("email must not be blank");
         }
-        String normalized = email.trim().toLowerCase(Locale.ROOT);
+        return hmacRaw(email.trim().toLowerCase(Locale.ROOT));
+    }
+
+    /**
+     * HMAC with no trimming or case folding. OTP codes go through here so a
+     * future change to email normalization cannot rewrite them.
+     */
+    public String hmacRaw(String value) {
+        if (value == null || value.isEmpty()) {
+            throw new IllegalArgumentException("value must not be empty");
+        }
         try {
             Mac mac = Mac.getInstance(ALGORITHM);
             mac.init(key);
-            return HexFormat.of().formatHex(mac.doFinal(normalized.getBytes(StandardCharsets.UTF_8)));
+            return HexFormat.of().formatHex(mac.doFinal(value.getBytes(StandardCharsets.UTF_8)));
         } catch (NoSuchAlgorithmException | InvalidKeyException e) {
             throw new IllegalStateException("HMAC computation failed", e);
         }

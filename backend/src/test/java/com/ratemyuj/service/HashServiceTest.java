@@ -55,6 +55,13 @@ class HashServiceTest {
     }
 
     @Test
+    @DisplayName("raw HMAC does not trim or lowercase, so codes are not rewritten")
+    void hmacRawDoesNotNormalize() {
+        assertThat(service.hmacRaw("AbC")).isNotEqualTo(service.hmacRaw("abc"));
+        assertThat(service.hmacRaw("  abc")).isNotEqualTo(service.hmacRaw("abc"));
+    }
+
+    @Test
     @DisplayName("blank email input is rejected")
     void blankEmailRejected() {
         assertThatThrownBy(() -> service.hmac("  "))

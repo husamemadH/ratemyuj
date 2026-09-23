@@ -5,6 +5,11 @@ spring:
     mongodb:
       uri: ${MONGODB_URI:mongodb://localhost:27017/ratemyuj}
       auto-index-creation: true
+  mail:
+    host: ${SMTP_HOST:}
+    port: ${SMTP_PORT:587}
+    username: ${SMTP_USERNAME:}
+    password: ${SMTP_PASSWORD:}
 
 openrouter:
   api-key: ${OPENROUTER_API_KEY}          # never commit this — env var only
@@ -15,4 +20,10 @@ openrouter:
   escalate-below-confidence: 0.6
 
 app:
-  hash-pepper: ${HASH_PEPPER}             # server-side secret for HMAC(email)
+  hash-pepper: ${HASH_PEPPER}             # server-side secret for HMAC(email). Not the JWT secret.
+  auth:
+    jwt-secret: ${JWT_SECRET}             # HS256 key, at least 32 bytes. Separate from HASH_PEPPER.
+    jwt-ttl: ${JWT_TTL:7d}
+    cookie-name: session
+    cookie-secure: ${COOKIE_SECURE:true}  # http://localhost still stores Secure cookies
+    mail-mode: ${MAIL_MODE:log}           # log prints the code; smtp sends it. Real deploys use smtp.

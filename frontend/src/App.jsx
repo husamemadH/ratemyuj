@@ -281,6 +281,7 @@ function ReviewForm({ professor, onPublished, onClose }) {
     setTimeout(() => panelRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
     /* API: POST /api/reviews  (بتوثيق JWT)
        body: { professorId, courseId, rating, comment, grade, difficulty, wouldTakeAgain } */
+    /* When this calls the API, use credentials: "include" and do not send X-Student-Hash. */
     const res = await mockSubmitReview({ comment });
     setResult(res);
     setPhase("done");
@@ -448,12 +449,16 @@ function BreakdownBar({ label, count, total }) {
   );
 }
 
-function Profile({ professor, onBack }) {
+function Profile({ professor, onBack, signedIn, authReady, onRequireAuth }) {
   const [reviews, setReviews] = useState(SEED_REVIEWS[professor.id] || []);
   const [writing, setWriting] = useState(false);
   const [stats, setStats] = useState({
     avg: professor.avgRating, count: professor.reviewCount, breakdown: { ...professor.breakdown },
   });
+
+  useEffect(() => {
+    if (!signedIn) setWriting(false);
+  }, [signedIn]);
 
   /* API: GET /api/professors/{id}  +  GET /api/professors/{id}/reviews */
 
@@ -490,7 +495,11 @@ function Profile({ professor, onBack }) {
                 </span>
               ))}
             </div>
-            <button onClick={() => setWriting(true)}
+            <button onClick={() => {
+                if (!authReady) return;
+                if (signedIn) setWriting(true);
+                else onRequireAuth();
+              }}
               className="mt-5 px-5 py-2.5 rounded-xl text-sm font-semibold"
               style={{ background: C.pine, color: "white" }}>
               اكتب تقييمك
@@ -636,11 +645,169 @@ function Home({ onOpen }) {
   );
 }
 
+/* ---------------- الدخول ---------------- */
+
+function LoginPanel({ onClose, onSuccess }) {
+  const [step, setStep] = useState("email");
+  const [email, setEmail] = useState("");
+  const [code, setCode] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const failMessage = async (res) => {
+    const body = await res.json().catch(() => ({}));
+    return body.error || "تعذّر إكمال الطلب";
+  };
+
+  const send = async (event) => {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const res = await fetch("/api/auth/request", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      if (!res.ok) {
+        setError(await failMessage(res));
+        return;
+      }
+      setStep("code");
+    } catch {
+      setError("تعذّر الاتصال بالخادم");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const confirm = async (event) => {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const res = await fetch("/api/auth/verify", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, code }),
+      });
+      if (!res.ok) {
+        setError(await failMessage(res));
+        return;
+      }
+      onSuccess();
+    } catch {
+      setError("تعذّر الاتصال بالخادم");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-20 flex items-end md:items-center justify-center px-4 py-6"
+      style={{ background: "rgba(12,59,46,0.45)" }}
+      onClick={onClose}>
+      <form onSubmit={step === "email" ? send : confirm}
+        className="w-full max-w-md rounded-2xl bg-white p-5 md:p-6"
+        style={{ border: `1px solid ${C.mist}` }}
+        onClick={(event) => event.stopPropagation()}>
+        <div className="flex items-start justify-between mb-4">
+          <div>
+            <h2 className="text-lg font-semibold" style={display}>دخول ببريد الجامعة</h2>
+            <p className="text-xs mt-1" style={{ color: "#5C6A61" }}>
+              رمز لمرة واحدة على بريد ju.edu.jo. ما منخزّن البريد مع التقييم.
+            </p>
+          </div>
+          <button type="button" onClick={onClose} className="text-sm px-2 py-1 rounded hover:bg-gray-100">✕</button>
+        </div>
+
+        {step === "email" ? (
+          <label className="block text-xs font-medium mb-2" style={{ color: "#5C6A61" }}>
+            البريد الجامعي
+            <input
+              type="email"
+              dir="ltr"
+              autoFocus
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="name@ju.edu.jo"
+              className="mt-2 w-full rounded-xl px-4 py-3 text-sm outline-none"
+              style={{ border: `1px solid ${C.mist}`, color: C.ink }}
+            />
+          </label>
+        ) : (
+          <label className="block text-xs font-medium mb-2" style={{ color: "#5C6A61" }}>
+            الرمز المرسل إلى <span dir="ltr">{email.trim()}</span>
+            <input
+              inputMode="numeric"
+              autoFocus
+              dir="ltr"
+              maxLength={6}
+              value={code}
+              onChange={(event) => setCode(event.target.value)}
+              placeholder="000000"
+              className="mt-2 w-full rounded-xl px-4 py-3 text-sm outline-none tracking-[0.4em] text-center"
+              style={{ border: `1px solid ${C.mist}`, color: C.ink }}
+            />
+          </label>
+        )}
+
+        {error && (
+          <p className="text-xs mt-3" style={{ color: C.brick }}>{error}</p>
+        )}
+
+        <div className="flex items-center justify-between gap-3 mt-5">
+          <button type="submit" disabled={busy}
+            className="px-5 py-2.5 rounded-xl text-sm font-semibold disabled:opacity-60"
+            style={{ background: C.pine, color: "white" }}>
+            {busy ? "لحظات…" : step === "email" ? "أرسل الرمز" : "تأكيد"}
+          </button>
+          {step === "code" ? (
+            <button type="button" onClick={() => { setStep("email"); setError(""); }}
+              className="text-xs" style={{ color: C.meadow }}>
+              تغيير البريد
+            </button>
+          ) : <span />}
+        </div>
+      </form>
+    </div>
+  );
+}
+
 /* ---------------- هيكل التطبيق ---------------- */
 
 export default function App() {
   const [view, setView] = useState({ page: "home", profId: null });
+  const [auth, setAuth] = useState("unknown");
+  const [showLogin, setShowLogin] = useState(false);
   const professor = PROFESSORS.find((p) => p.id === view.profId);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/auth/me", { credentials: "include" })
+      .then((res) => (res.ok ? res.json() : { authenticated: false }))
+      .then((body) => {
+        if (!cancelled) setAuth(body.authenticated ? "authenticated" : "anonymous");
+      })
+      .catch(() => {
+        if (!cancelled) setAuth("anonymous");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const logout = async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
+    } catch {
+      /* a failed call leaves the cookie until it expires */
+    }
+    setAuth("anonymous");
+    setShowLogin(false);
+  };
 
   return (
     <div dir="rtl" lang="ar" className="min-h-screen" style={{ background: C.chalk, color: C.ink, ...body }}>
@@ -656,15 +823,40 @@ export default function App() {
           className="text-white font-bold text-sm" style={display}>
           قيّم <span style={{ color: C.amber }}>دكتورك</span>
         </button>
-        <span className="text-xs px-2.5 py-1 rounded-full"
-          style={{ background: "rgba(255,255,255,0.1)", color: "#CFE8D8" }} dir="ltr">
-          s.aymen@ju.edu.jo ✓
-        </span>
+        {auth === "unknown" ? (
+          <span className="text-xs px-2.5 py-1 rounded-full" style={{ visibility: "hidden" }}>دخول</span>
+        ) : auth === "authenticated" ? (
+          <span className="flex items-center gap-2">
+            <span className="text-xs px-2.5 py-1 rounded-full"
+              style={{ background: "rgba(255,255,255,0.1)", color: "#CFE8D8" }}>
+              موثّق
+            </span>
+            <button onClick={logout} className="text-xs" style={{ color: "#CFE8D8" }}>خروج</button>
+          </span>
+        ) : (
+          <button onClick={() => setShowLogin(true)}
+            className="text-xs px-2.5 py-1 rounded-full"
+            style={{ background: "rgba(255,255,255,0.1)", color: "#CFE8D8" }}>
+            دخول
+          </button>
+        )}
       </header>
 
       {view.page === "home"
         ? <Home onOpen={(id) => setView({ page: "prof", profId: id })} />
-        : <Profile professor={professor} onBack={() => setView({ page: "home", profId: null })} />}
+        : <Profile
+            professor={professor}
+            onBack={() => setView({ page: "home", profId: null })}
+            signedIn={auth === "authenticated"}
+            authReady={auth !== "unknown"}
+            onRequireAuth={() => setShowLogin(true)}
+          />}
+      {showLogin && (
+        <LoginPanel
+          onClose={() => setShowLogin(false)}
+          onSuccess={() => { setAuth("authenticated"); setShowLogin(false); }}
+        />
+      )}
     </div>
   );
 }
