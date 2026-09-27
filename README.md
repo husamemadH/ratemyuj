@@ -13,12 +13,3 @@ backend/    Spring Boot 3 + MongoDB API, AI moderation via OpenRouter
 frontend/   React + Tailwind UI (Arabic, RTL)
 ```
 
-See each folder's own README for setup and run instructions.
-
-## Status
-
-- ✅ Domain model, review submission flow, AI moderation pipeline, test suite
-- ✅ UI (mocked data — not yet wired to the live API)
-- ✅ OTP + JWT auth (`@ju.edu.jo` email code, HttpOnly session cookie)
-- ⬜ Admin endpoints for the MANUAL_REVIEW queue
-- ⬜ Rate limiting on submissions
