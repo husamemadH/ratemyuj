@@ -3,6 +3,9 @@ backend/target/
 backend/.mvn/
 backend/*.iml
 backend/.idea/
+backend/.classpath
+backend/.project
+backend/.settings/
 
 # frontend
 frontend/node_modules/

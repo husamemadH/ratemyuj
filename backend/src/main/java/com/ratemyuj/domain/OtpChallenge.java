@@ -1,17 +1,19 @@
 package com.ratemyuj.domain;
 
-import org.springframework.data.annotation.Id;
-import org.springframework.data.mongodb.core.index.CompoundIndex;
-import org.springframework.data.mongodb.core.index.Indexed;
-import org.springframework.data.mongodb.core.mapping.Document;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
 
 import java.time.Instant;
 
-@Document("otp_challenges")
-@CompoundIndex(name = "email_created", def = "{'email': 1, 'createdAt': -1}")
+@Entity
+@Table(name = "otp_challenges")
 public class OtpChallenge {
 
     @Id
+    @GeneratedValue(strategy = GenerationType.UUID)
     private String id;
 
     private String email;
@@ -21,9 +23,7 @@ public class OtpChallenge {
     private String requesterIp;
     private Instant createdAt;
     private Instant codeExpiresAt;
-
-    @Indexed(expireAfterSeconds = 0)
-    private Instant expiresAt;
+    private Instant expiresAt;   // purged by OtpService.purgeExpiredChallenges()
 
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }

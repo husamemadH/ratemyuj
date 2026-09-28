@@ -1,6 +1,7 @@
 package com.ratemyuj.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ratemyuj.auth.AdminApiKeyFilter;
 import com.ratemyuj.auth.JwtAuthFilter;
 import com.ratemyuj.auth.JwtService;
 import jakarta.servlet.http.HttpServletResponse;
@@ -28,6 +29,11 @@ public class SecurityConfig {
     }
 
     @Bean
+    AdminApiKeyFilter adminApiKeyFilter(AdminProperties adminProperties) {
+        return new AdminApiKeyFilter(adminProperties);
+    }
+
+    @Bean
     AuthenticationEntryPoint authenticationEntryPoint(ObjectMapper mapper) {
         return (request, response, ex) -> {
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
@@ -38,6 +44,7 @@ public class SecurityConfig {
 
     @Bean
     SecurityFilterChain securityFilterChain(HttpSecurity http, JwtAuthFilter jwtAuthFilter,
+                                            AdminApiKeyFilter adminApiKeyFilter,
                                             AuthenticationEntryPoint authenticationEntryPoint) throws Exception {
         // SameSite=Lax on the session cookie is the CSRF control. No state-changing route is a GET.
         http
@@ -52,9 +59,11 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/auth/request", "/api/auth/verify", "/api/auth/logout").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/auth/me").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/professors/**").permitAll()
+                        .requestMatchers("/api/admin/**").permitAll()   // AdminApiKeyFilter guards these
                         .requestMatchers("/error").permitAll()
                         .anyRequest().authenticated())
-                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterBefore(adminApiKeyFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }
 }

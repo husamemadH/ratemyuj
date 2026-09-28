@@ -1,160 +1,198 @@
 package com.ratemyuj.moderation;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ratemyuj.config.OpenRouterProperties;
-import com.ratemyuj.domain.ModerationResult;
 import com.ratemyuj.domain.ModerationVerdict;
-import com.ratemyuj.moderation.OpenRouterClient.CompletionResult;
+import com.ratemyuj.moderation.JevMessages.Answer;
+import com.ratemyuj.moderation.JevMessages.DecisionsResponse;
+import com.ratemyuj.moderation.JevMessages.Question;
+import com.ratemyuj.moderation.JevMessages.Usage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.web.client.RestClientException;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class ModerationServiceTest {
 
     private static final double ESCALATE_BELOW = 0.6;
+    private static final double CATEGORY_THRESHOLD = 0.5;
+    private static final String MODEL = "typesafe/jev-1.13-20260917";
+
+    private static final String[] CATEGORY_KEYS = {
+            "profanity", "personal_attack", "discrimination", "unsubstantiated_accusation",
+            "private_info", "not_constructive", "off_topic"
+    };
 
     @Mock
-    private OpenRouterClient client;
+    private JevClient client;
 
     private ModerationService service;
 
     @BeforeEach
     void setUp() {
         OpenRouterProperties props = new OpenRouterProperties(
-                "test-key", "https://openrouter.test/api/v1",
-                "primary/model", "fallback/model", 12, ESCALATE_BELOW);
-        service = new ModerationService(client, props, new ObjectMapper());
+                "test-key", "https://openrouter.test", "/api/alpha/decisions",
+                "typesafe/jev-1.13", 12, ESCALATE_BELOW, CATEGORY_THRESHOLD);
+        service = new ModerationService(client, props);
     }
 
-    private void modelReturns(String json) {
-        when(client.complete(anyString(), anyString()))
-                .thenReturn(new CompletionResult(json, "primary/model"));
+    private Answer choice(String value, Double confidence) {
+        return new Answer("choice", value, null, null, confidence, Map.of(), Map.of());
+    }
+
+    private Answer noul(Double probability) {
+        return new Answer("noul", null, probability, null, null, Map.of(), Map.of());
+    }
+
+    private Map<String, Answer> allCategories(double probability) {
+        Map<String, Answer> categories = new LinkedHashMap<>();
+        for (String key : CATEGORY_KEYS) {
+            categories.put(key, noul(probability));
+        }
+        return categories;
+    }
+
+    private void jevReturns(String verdict, Double confidence, Map<String, Answer> categories) {
+        Map<String, Answer> answers = new LinkedHashMap<>();
+        answers.put("verdict", choice(verdict, confidence));
+        answers.putAll(categories);
+        when(client.decide(anyMap(), anyMap())).thenReturn(
+                new DecisionsResponse("gen-dec-1", MODEL, "TypeSafe", answers,
+                        new Usage(120, 24, 0.00002)));
     }
 
     @Nested
-    @DisplayName("verdict parsing")
-    class VerdictParsing {
+    @DisplayName("verdict mapping")
+    class VerdictMapping {
 
         @Test
-        @DisplayName("APPROVE with high confidence publishes")
+        @DisplayName("APPROVE with high confidence and no flags publishes")
         void approve() {
-            modelReturns("""
-                    {"verdict":"APPROVE","categories":[],
-                     "student_feedback":null,"internal_reason":"constructive","confidence":0.97}""");
+            jevReturns("APPROVE", 0.97, allCategories(0.03));
 
-            ModerationResult result = service.moderate("Great lectures, fair exams", "Dr. X", "CS101");
+            var result = service.moderate("Great lectures, fair exams", "Dr. X", "CS101");
 
             assertThat(result.getVerdict()).isEqualTo(ModerationVerdict.APPROVE);
             assertThat(result.getFlaggedCategories()).isEmpty();
-            assertThat(result.getModel()).isEqualTo("primary/model");
+            assertThat(result.getStudentFeedback()).isNull();
+            assertThat(result.getModel()).isEqualTo(MODEL);
             assertThat(result.getConfidence()).isEqualTo(0.97);
+            assertThat(result.getInternalReason()).contains("APPROVE").contains("personal_attack=0.03");
         }
 
         @Test
-        @DisplayName("REJECT carries categories and student feedback")
+        @DisplayName("REJECT carries the flagged category and a same-language template")
         void reject() {
-            modelReturns("""
-                    {"verdict":"REJECT","categories":["PERSONAL_ATTACK"],
-                     "student_feedback":"Focus on the teaching, not the person.",
-                     "internal_reason":"insults the professor","confidence":0.92}""");
+            jevReturns("REJECT", 0.92,
+                    Map.of("personal_attack", noul(0.93), "profanity", noul(0.11)));
 
-            ModerationResult result = service.moderate("he is an idiot", "Dr. X", "CS101");
+            var result = service.moderate("he is an idiot", "Dr. X", "CS101");
 
             assertThat(result.getVerdict()).isEqualTo(ModerationVerdict.REJECT);
             assertThat(result.getFlaggedCategories()).containsExactly("PERSONAL_ATTACK");
             assertThat(result.getStudentFeedback()).contains("teaching");
+            assertThat(result.getStudentFeedback()).doesNotContain("idiot");
+        }
+
+        @Test
+        @DisplayName("an Arabic comment gets Arabic student feedback")
+        void arabicFeedback() {
+            jevReturns("REJECT", 0.92, Map.of("personal_attack", noul(0.9)));
+
+            var result = service.moderate("هذا الدكتور أسلوبه سيء جداً", "د. خالد", "CS101");
+
+            assertThat(result.getStudentFeedback()).contains("الرجاء");
+        }
+
+        @Test
+        @DisplayName("multiple flags are ordered by probability, highest first")
+        void flagOrdering() {
+            jevReturns("REJECT", 0.95,
+                    Map.of("personal_attack", noul(0.9), "profanity", noul(0.96)));
+
+            var result = service.moderate("blah", "Dr. X", "CS101");
+
+            assertThat(result.getFlaggedCategories()).containsExactly("PROFANITY", "PERSONAL_ATTACK");
         }
 
         @Test
         @DisplayName("explicit ESCALATE is preserved")
         void escalate() {
-            modelReturns("""
-                    {"verdict":"ESCALATE","categories":[],
-                     "student_feedback":"Held for review.","internal_reason":"ambiguous sarcasm","confidence":0.5}""");
+            jevReturns("ESCALATE", 0.5, allCategories(0.2));
 
-            assertThat(service.moderate("sure, 'best' teacher ever", "Dr. X", "CS101").getVerdict())
-                    .isEqualTo(ModerationVerdict.ESCALATE);
+            var result = service.moderate("sure, 'best' teacher ever", "Dr. X", "CS101");
+
+            assertThat(result.getVerdict()).isEqualTo(ModerationVerdict.ESCALATE);
+            assertThat(result.getStudentFeedback()).contains("checked");
         }
 
         @Test
-        @DisplayName("markdown code fences around the JSON are stripped")
-        void stripsFences() {
-            modelReturns("""
-                    ```json
-                    {"verdict":"APPROVE","categories":[],"student_feedback":null,
-                     "internal_reason":"fine","confidence":0.9}
-                    ```""");
-
-            assertThat(service.moderate("solid course", "Dr. X", "CS101").getVerdict())
-                    .isEqualTo(ModerationVerdict.APPROVE);
-        }
-
-        @Test
-        @DisplayName("unknown verdict string becomes ESCALATE")
+        @DisplayName("an unknown choice string becomes ESCALATE")
         void unknownVerdict() {
-            modelReturns("""
-                    {"verdict":"MAYBE","categories":[],"student_feedback":null,
-                     "internal_reason":"?","confidence":0.9}""");
+            jevReturns("MAYBE", 0.9, allCategories(0.1));
 
             assertThat(service.moderate("text", "Dr. X", "CS101").getVerdict())
                     .isEqualTo(ModerationVerdict.ESCALATE);
         }
-
-        @Test
-        @DisplayName("null categories are normalized to an empty list")
-        void nullCategories() {
-            modelReturns("""
-                    {"verdict":"APPROVE","student_feedback":null,
-                     "internal_reason":"fine","confidence":0.9}""");
-
-            assertThat(service.moderate("text", "Dr. X", "CS101").getFlaggedCategories()).isEmpty();
-        }
     }
 
     @Nested
-    @DisplayName("fail-safe behavior — a review is never published on failure")
+    @DisplayName("fail-safe behavior — a review is never published on failure or contradiction")
     class FailSafe {
 
         @Test
-        @DisplayName("unparseable model output escalates instead of approving")
-        void garbageOutput() {
-            modelReturns("I think this comment is fine to publish!");
+        @DisplayName("client failure (network/timeout) escalates with MODERATION_UNAVAILABLE")
+        void clientFailure() {
+            when(client.decide(anyMap(), anyMap()))
+                    .thenThrow(new RestClientException("connection timed out"));
 
-            ModerationResult result = service.moderate("text", "Dr. X", "CS101");
+            var result = service.moderate("text", "Dr. X", "CS101");
 
             assertThat(result.getVerdict()).isEqualTo(ModerationVerdict.ESCALATE);
             assertThat(result.getFlaggedCategories()).containsExactly("MODERATION_UNAVAILABLE");
-        }
-
-        @Test
-        @DisplayName("client failure (network/timeout) escalates")
-        void clientFailure() {
-            when(client.complete(anyString(), anyString()))
-                    .thenThrow(new RestClientException("connection timed out"));
-
-            ModerationResult result = service.moderate("text", "Dr. X", "CS101");
-
-            assertThat(result.getVerdict()).isEqualTo(ModerationVerdict.ESCALATE);
-            assertThat(result.getStudentFeedback()).isNotBlank();
             assertThat(result.getInternalReason()).contains("timed out");
         }
 
         @Test
-        @DisplayName("low-confidence APPROVE is escalated for a human look")
+        @DisplayName("APPROVE contradicted by a category above the threshold escalates")
+        void approveWithFlagEscalates() {
+            jevReturns("APPROVE", 0.95,
+                    Map.of("profanity", noul(0.9), "personal_attack", noul(0.1)));
+
+            var result = service.moderate("text", "Dr. X", "CS101");
+
+            assertThat(result.getVerdict()).isEqualTo(ModerationVerdict.ESCALATE);
+            assertThat(result.getFlaggedCategories()).containsExactly("PROFANITY");
+        }
+
+        @Test
+        @DisplayName("REJECT with no category above the threshold escalates")
+        void rejectWithoutFlagEscalates() {
+            jevReturns("REJECT", 0.95, allCategories(0.49));
+
+            var result = service.moderate("text", "Dr. X", "CS101");
+
+            assertThat(result.getVerdict()).isEqualTo(ModerationVerdict.ESCALATE);
+            assertThat(result.getFlaggedCategories()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("low-confidence APPROVE escalates for a human look")
         void lowConfidenceApprove() {
-            modelReturns("""
-                    {"verdict":"APPROVE","categories":[],"student_feedback":null,
-                     "internal_reason":"probably fine","confidence":0.4}""");
+            jevReturns("APPROVE", 0.4, allCategories(0.05));
 
             assertThat(service.moderate("text", "Dr. X", "CS101").getVerdict())
                     .isEqualTo(ModerationVerdict.ESCALATE);
@@ -163,12 +201,52 @@ class ModerationServiceTest {
         @Test
         @DisplayName("confidence exactly at the threshold is NOT escalated")
         void confidenceAtThreshold() {
-            modelReturns("""
-                    {"verdict":"APPROVE","categories":[],"student_feedback":null,
-                     "internal_reason":"fine","confidence":%s}""".formatted(ESCALATE_BELOW));
+            jevReturns("APPROVE", ESCALATE_BELOW, allCategories(0.05));
 
             assertThat(service.moderate("text", "Dr. X", "CS101").getVerdict())
                     .isEqualTo(ModerationVerdict.APPROVE);
         }
+
+        @Test
+        @DisplayName("a missing confidence value escalates")
+        void missingConfidence() {
+            jevReturns("APPROVE", null, allCategories(0.05));
+
+            assertThat(service.moderate("text", "Dr. X", "CS101").getVerdict())
+                    .isEqualTo(ModerationVerdict.ESCALATE);
+        }
+
+        @Test
+        @DisplayName("a missing verdict answer escalates instead of approving")
+        void missingVerdictAnswer() {
+            when(client.decide(anyMap(), anyMap())).thenReturn(
+                    new DecisionsResponse("gen-dec-1", MODEL, "TypeSafe",
+                            Map.of("profanity", noul(0.01)), new Usage(10, 1, 0.0)));
+
+            var result = service.moderate("text", "Dr. X", "CS101");
+
+            assertThat(result.getVerdict()).isEqualTo(ModerationVerdict.ESCALATE);
+            assertThat(result.getFlaggedCategories()).containsExactly("MODERATION_UNAVAILABLE");
+        }
+    }
+
+    @Test
+    @DisplayName("sends one choice question plus one noul per policy category, with the comment as state")
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void requestShape() {
+        jevReturns("APPROVE", 0.99, allCategories(0.01));
+
+        service.moderate("Lectures are clear", "Dr. X", "CS101");
+
+        ArgumentCaptor<Map> questions = ArgumentCaptor.forClass(Map.class);
+        ArgumentCaptor<Map> state = ArgumentCaptor.forClass(Map.class);
+        verify(client).decide(state.capture(), questions.capture());
+
+        assertThat(questions.getValue()).hasSize(8);
+        assertThat(((Question) questions.getValue().get("verdict")).type()).isEqualTo("choice");
+        assertThat(((Question) questions.getValue().get("profanity")).type()).isEqualTo("noul");
+        assertThat(state.getValue().get("student_comment")).isEqualTo("Lectures are clear");
+        assertThat(state.getValue().get("professor_name")).isEqualTo("Dr. X");
+        assertThat(state.getValue().get("course_code")).isEqualTo("CS101");
     }
 }

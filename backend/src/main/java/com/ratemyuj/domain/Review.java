@@ -1,36 +1,52 @@
 package com.ratemyuj.domain;
 
-import org.springframework.data.annotation.Id;
-import org.springframework.data.mongodb.core.index.CompoundIndex;
-import org.springframework.data.mongodb.core.index.Indexed;
-import org.springframework.data.mongodb.core.mapping.Document;
+import jakarta.persistence.Column;
+import jakarta.persistence.Embedded;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 
 import java.time.Instant;
 
-@Document("reviews")
-@CompoundIndex(name = "uniq_review",
-        def = "{'studentHash': 1, 'professorId': 1, 'courseId': 1}", unique = true)
+@Entity
+@Table(name = "reviews", uniqueConstraints = @UniqueConstraint(
+        name = "uniq_review", columnNames = {"student_hash", "professor_id", "course_id"}))
 public class Review {
 
     @Id
+    @GeneratedValue(strategy = GenerationType.UUID)
     private String id;
 
-    @Indexed
+    @Column(name = "professor_id", nullable = false)
     private String professorId;
+
+    @Column(name = "course_id", nullable = false)
     private String courseId;
+
     private String courseCode;   // denormalized for display
     private String courseName;
 
+    @Column(name = "student_hash", nullable = false)
     private String studentHash;  // HMAC-SHA256(email, pepper) — never plaintext
 
     private int rating;          // 1..5
+    @Column(length = 1000, nullable = false)
     private String comment;
+    @Enumerated(EnumType.STRING)
     private Grade grade;
     private Integer difficulty;  // 1..5, nullable
     private Boolean wouldTakeAgain;
 
-    @Indexed
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
     private ReviewStatus status;
+
+    @Embedded
     private ModerationResult moderation;
     private int reportCount;
 

@@ -1,5 +1,6 @@
 package com.ratemyuj.service;
 
+import com.ratemyuj.config.RateLimitProperties;
 import com.ratemyuj.domain.*;
 import com.ratemyuj.dto.CreateReviewRequest;
 import com.ratemyuj.dto.ReviewResponse;
@@ -9,11 +10,12 @@ import com.ratemyuj.moderation.ModerationService;
 import com.ratemyuj.repository.CourseRepository;
 import com.ratemyuj.repository.ProfessorRepository;
 import com.ratemyuj.repository.ReviewRepository;
-import org.springframework.dao.DuplicateKeyException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -32,20 +34,25 @@ import java.util.Optional;
 @Service
 public class ReviewService {
 
+    private static final Duration RATE_WINDOW = Duration.ofHours(1);
+    static final String RATE_LIMIT_MESSAGE = "Too many reviews submitted. Try again later.";
+
     private final ReviewRepository reviews;
     private final ProfessorRepository professors;
     private final CourseRepository courses;
     private final ModerationService moderation;
     private final ProfessorStatsService stats;
+    private final RateLimitProperties rateLimit;
 
     public ReviewService(ReviewRepository reviews, ProfessorRepository professors,
                          CourseRepository courses, ModerationService moderation,
-                         ProfessorStatsService stats) {
+                         ProfessorStatsService stats, RateLimitProperties rateLimit) {
         this.reviews = reviews;
         this.professors = professors;
         this.courses = courses;
         this.moderation = moderation;
         this.stats = stats;
+        this.rateLimit = rateLimit;
     }
 
     public ReviewSubmissionResponse submit(String studentHash, CreateReviewRequest request) {
@@ -56,6 +63,14 @@ public class ReviewService {
 
         if (professor.getCourseIds() == null || !professor.getCourseIds().contains(course.getId())) {
             throw ApiException.badRequest("This professor does not teach the selected course");
+        }
+
+        if (rateLimit.reviewsPerHour() > 0) {
+            long recent = reviews.countByStudentHashAndUpdatedAtAfter(
+                    studentHash, Instant.now().minus(RATE_WINDOW));
+            if (recent >= rateLimit.reviewsPerHour()) {
+                throw ApiException.tooManyRequests(RATE_LIMIT_MESSAGE);
+            }
         }
 
         Optional<Review> existing = reviews.findByStudentHashAndProfessorIdAndCourseId(
@@ -87,7 +102,7 @@ public class ReviewService {
         review.setUpdatedAt(Instant.now());
         try {
             review = reviews.save(review);
-        } catch (DuplicateKeyException e) {
+        } catch (DataIntegrityViolationException e) {
             // lost a race with a concurrent submit from the same student
             throw ApiException.conflict("You have already reviewed this professor for this course");
         }

@@ -1,10 +1,16 @@
 spring:
   application:
     name: ratemyuj
-  data:
-    mongodb:
-      uri: ${MONGODB_URI:mongodb://localhost:27017/ratemyuj}
-      auto-index-creation: true
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/ratemyuj}
+    username: ${DB_USERNAME:ratemyuj}
+    password: ${DB_PASSWORD:ratemyuj}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
   mail:
     host: ${SMTP_HOST:}
     port: ${SMTP_PORT:587}
@@ -13,14 +19,19 @@ spring:
 
 openrouter:
   api-key: ${OPENROUTER_API_KEY}          # never commit this — env var only
-  base-url: https://openrouter.ai/api/v1
-  model: ${MODERATION_MODEL:openai/gpt-4o-mini}
-  fallback-model: ${MODERATION_FALLBACK_MODEL:meta-llama/llama-3.3-70b-instruct}
+  base-url: https://openrouter.ai
+  decisions-path: /api/alpha/decisions     # Jev (TypeSafe) decision model endpoint
+  model: ${MODERATION_MODEL:typesafe/jev-1.13}
   timeout-seconds: 12
-  escalate-below-confidence: 0.6
+  escalate-below-confidence: ${MODERATION_ESCALATE_BELOW_CONFIDENCE:0.6}
+  category-threshold: ${MODERATION_CATEGORY_THRESHOLD:0.5}  # noul probability above which a policy category is flagged
 
 app:
   hash-pepper: ${HASH_PEPPER}             # server-side secret for HMAC(email). Not the JWT secret.
+  rate-limit:
+    reviews-per-hour: ${REVIEWS_PER_HOUR:10}  # per student; 0 disables the cap
+  admin:
+    api-key: ${ADMIN_API_KEY:}            # required for /api/admin/**; empty disables the admin API
   auth:
     jwt-secret: ${JWT_SECRET}             # HS256 key, at least 32 bytes. Separate from HASH_PEPPER.
     jwt-ttl: ${JWT_TTL:7d}

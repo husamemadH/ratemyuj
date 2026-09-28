@@ -6,7 +6,9 @@ import com.ratemyuj.repository.OtpChallengeRepository;
 import com.ratemyuj.service.HashService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.security.MessageDigest;
 import java.security.SecureRandom;
@@ -45,6 +47,18 @@ public class OtpService {
         this.hashes = hashes;
         this.emails = emails;
         this.dummyCodeHash = HexFormat.of().parseHex(hashes.hmacRaw("dummy-otp-compare"));
+    }
+
+    /**
+     * Replaces the Mongo TTL index: expired challenges are purged on a timer.
+     */
+    @Scheduled(fixedDelayString = "PT15M")
+    @Transactional
+    public void purgeExpiredChallenges() {
+        long deleted = challenges.deleteByExpiresAtBefore(Instant.now());
+        if (deleted > 0) {
+            log.info("Purged {} expired OTP challenges", deleted);
+        }
     }
 
     public void request(String email, String remoteAddr) {

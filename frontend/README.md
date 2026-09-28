@@ -1,31 +1,42 @@
 # RateMyUjProfessor — Frontend
 
-React + Tailwind UI (Arabic, RTL). Currently wired to an in-file mock API —
-see `API:` comments in `src/App.jsx` for the exact Spring Boot endpoints
-each mock stands in for.
+React + Tailwind UI (Arabic, RTL), wired to the Spring Boot API.
 
 ## Run locally
+
+The Vite dev server proxies `/api` to `http://localhost:8080`, so the session
+cookie stays first-party. Start the backend first (see `../backend/README.md`).
 
 ```bash
 npm install
 npm run dev
 ```
 
-## Connecting to the real backend
+## What it calls
 
-The Vite dev server proxies `/api` to `http://localhost:8080`, so the
-session cookie is first-party. Sign-in (`/api/auth/request`, `/api/auth/verify`,
-`/api/auth/me`, `/api/auth/logout`) already uses that proxy.
+| UI | Endpoint |
+|---|---|
+| بحث الصفحة الرئيسية | `GET /api/professors?q=&page=&size=` |
+| ملف الدكتور (المعدل + التوزيع) | `GET /api/professors/{id}` |
+| تقييمات الدكتور (مع paging) | `GET /api/professors/{id}/reviews?page=&size=` |
+| إرسال تقييم | `POST /api/reviews` (cookie required) |
+| الدخول بالرمز | `POST /api/auth/request`, `POST /api/auth/verify` |
+| الجلسة/الخروج | `GET /api/auth/me`, `POST /api/auth/logout` |
 
-Professor search and review submission still use the in-file mock data.
-When those calls move to the API, send the cookie and do not set
-`X-Student-Hash`:
+All requests send `credentials: "include"` and never send an identity header —
+the server derives the student from the HttpOnly session cookie.
 
-```js
-const res = await fetch("/api/reviews", {
-  method: "POST",
-  credentials: "include",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ professorId, courseId, rating, comment, grade, difficulty, wouldTakeAgain }),
-}).then(r => r.json());
+## Admin queue
+
+Open `/#/admin` (or click «الإدارة» in the header) and enter the backend's
+`ADMIN_API_KEY`. The queue lists reviews by status (MANUAL_REVIEW, REJECTED,
+PUBLISHED, HIDDEN, REMOVED) with the full moderation audit trail (verdict,
+flags, confidence), and actions publish/reject/hide/remove. The key lives in
+`sessionStorage` only and is sent as the `X-Admin-Key` header; professor stats
+adjust server-side.
+
+## Production build
+
+```bash
+npm run build
 ```

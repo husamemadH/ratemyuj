@@ -1,40 +1,59 @@
 package com.ratemyuj.domain;
 
-import org.springframework.data.annotation.Id;
-import org.springframework.data.mongodb.core.index.TextIndexed;
-import org.springframework.data.mongodb.core.mapping.Document;
+import jakarta.persistence.CollectionTable;
+import jakarta.persistence.Column;
+import jakarta.persistence.ElementCollection;
+import jakarta.persistence.Embeddable;
+import jakarta.persistence.Embedded;
+import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.Table;
 
 import java.time.Instant;
 import java.util.List;
 
-@Document("professors")
+@Entity
+@Table(name = "professors")
 public class Professor {
 
     @Id
+    @GeneratedValue(strategy = GenerationType.UUID)
     private String id;
 
-    @TextIndexed(weight = 3)
     private String fullName;
-    @TextIndexed
     private String department;
     private String college;
     private String title;      // Dr., Prof., Eng.
     private String photoUrl;
 
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "professor_courses", joinColumns = @JoinColumn(name = "professor_id"))
+    @Column(name = "course_id", nullable = false)
     private List<String> courseIds;
 
     // denormalized aggregates, maintained atomically by ProfessorStatsService
     private double avgRating;
     private int reviewCount;
-    private int ratingSum;     // kept so avg can be recomputed with $inc only
+    private int ratingSum;     // kept so avg can be recomputed atomically
+
+    @Embedded
     private RatingBreakdown breakdown = new RatingBreakdown();
 
     private boolean active = true;
     private Instant createdAt;
     private Instant updatedAt;
 
+    @Embeddable
     public static class RatingBreakdown {
-        private int one, two, three, four, five;
+        @Column(name = "breakdown_one") private int one;
+        @Column(name = "breakdown_two") private int two;
+        @Column(name = "breakdown_three") private int three;
+        @Column(name = "breakdown_four") private int four;
+        @Column(name = "breakdown_five") private int five;
         public int getOne() { return one; }
         public void setOne(int one) { this.one = one; }
         public int getTwo() { return two; }

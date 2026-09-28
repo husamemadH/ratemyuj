@@ -1,21 +1,46 @@
 package com.ratemyuj.domain;
 
+import jakarta.persistence.Column;
+import jakarta.persistence.Embeddable;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
+
 import java.time.Instant;
 import java.util.List;
 
 /**
- * Embedded in Review. Full audit trail of what the AI decided and why,
- * so admins can override and the prompt can be tuned over time.
+ * Embedded in Review. Full audit trail of what Jev decided and why,
+ * so admins can override and the question set can be tuned over time.
  */
+@Embeddable
 public class ModerationResult {
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "moderation_verdict")
     private ModerationVerdict verdict;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "moderation_flagged_categories", columnDefinition = "jsonb")
     private List<String> flaggedCategories; // e.g. ["PROFANITY", "PERSONAL_ATTACK"]
+
+    @Column(name = "moderation_student_feedback", columnDefinition = "text")
     private String studentFeedback;         // shown to the student on rejection
-    private String internalReason;          // model's full reasoning, admin-only
-    private double confidence;              // 0.0 - 1.0 self-reported by model
-    private String model;                   // which OpenRouter model judged it
+
+    @Column(name = "moderation_internal_reason", columnDefinition = "text")
+    private String internalReason;          // choice probabilities, admin-only
+
+    @Column(name = "moderation_confidence")
+    private double confidence;              // 0.0 - 1.0 reported by Jev
+
+    @Column(name = "moderation_model")
+    private String model;                   // which Jev release judged it
+
+    @Column(name = "moderation_latency_ms")
     private long latencyMs;
+
+    @Column(name = "moderation_checked_at")
     private Instant checkedAt;
 
     public ModerationResult() {}

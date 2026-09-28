@@ -1,0 +1,29 @@
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
+
+openrouter:
+  api-key: test-key
+  base-url: http://127.0.0.1:9
+  decisions-path: /api/alpha/decisions
+  model: typesafe/jev-1.13
+  timeout-seconds: 2
+  escalate-below-confidence: 0.6
+  category-threshold: 0.5
+
+app:
+  hash-pepper: test-pepper
+  rate-limit:
+    reviews-per-hour: 1000
+  admin:
+    api-key: test-admin-key
+  auth:
+    jwt-secret: 0123456789abcdef0123456789abcdef
+    jwt-ttl: 7d
+    cookie-name: session
+    cookie-secure: false
+    mail-mode: log

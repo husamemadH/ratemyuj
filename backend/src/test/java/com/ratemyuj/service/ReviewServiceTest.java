@@ -1,5 +1,6 @@
 package com.ratemyuj.service;
 
+import com.ratemyuj.config.RateLimitProperties;
 import com.ratemyuj.domain.*;
 import com.ratemyuj.dto.CreateReviewRequest;
 import com.ratemyuj.dto.ReviewSubmissionResponse;
@@ -17,7 +18,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.dao.DuplicateKeyException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 
 import java.time.Instant;
@@ -40,6 +41,7 @@ class ReviewServiceTest {
     @Mock private CourseRepository courses;
     @Mock private ModerationService moderation;
     @Mock private ProfessorStatsService stats;
+    @Mock private RateLimitProperties rateLimit;
 
     @InjectMocks private ReviewService service;
 
@@ -204,14 +206,14 @@ class ReviewServiceTest {
         }
 
         @Test
-        @DisplayName("a lost insert race (DuplicateKeyException) surfaces as 409, not 500")
-        void duplicateKeyRaceBecomesConflict() {
+        @DisplayName("a lost insert race (unique constraint violation) surfaces as 409, not 500")
+        void integrityViolationBecomesConflict() {
             when(professors.findById("p1")).thenReturn(Optional.of(professor));
             when(courses.findById("c1")).thenReturn(Optional.of(course));
             when(reviews.findByStudentHashAndProfessorIdAndCourseId(STUDENT, "p1", "c1"))
                     .thenReturn(Optional.empty());
             when(reviews.save(any(Review.class)))
-                    .thenThrow(new DuplicateKeyException("E11000 duplicate key"));
+                    .thenThrow(new DataIntegrityViolationException("uniq_review violation"));
 
             assertThatThrownBy(() -> service.submit(STUDENT, validRequest()))
                     .isInstanceOf(ApiException.class)
@@ -310,6 +312,71 @@ class ReviewServiceTest {
                     .isInstanceOf(ApiException.class);
             verify(reviews, never()).delete(any(Review.class));
             verifyNoInteractions(stats);
+        }
+    }
+
+    @Nested
+    @DisplayName("submission rate limit")
+    class RateLimit {
+
+        @Test
+        @DisplayName("a student at the hourly cap gets 429 before moderation is called")
+        void hourlyCapBlocks() {
+            when(rateLimit.reviewsPerHour()).thenReturn(2);
+            when(professors.findById("p1")).thenReturn(Optional.of(professor));
+            when(courses.findById("c1")).thenReturn(Optional.of(course));
+            when(reviews.countByStudentHashAndUpdatedAtAfter(eq(STUDENT), any(Instant.class)))
+                    .thenReturn(2L);
+
+            assertThatThrownBy(() -> service.submit(STUDENT, validRequest()))
+                    .isInstanceOfSatisfying(ApiException.class, error -> {
+                        assertThat(error.getStatus()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+                        assertThat(error.getMessage()).isEqualTo(ReviewService.RATE_LIMIT_MESSAGE);
+                    });
+            verifyNoInteractions(moderation);
+        }
+
+        @Test
+        @DisplayName("one below the cap still goes through")
+        void belowCapPasses() {
+            when(rateLimit.reviewsPerHour()).thenReturn(2);
+            when(professors.findById("p1")).thenReturn(Optional.of(professor));
+            when(courses.findById("c1")).thenReturn(Optional.of(course));
+            when(reviews.countByStudentHashAndUpdatedAtAfter(eq(STUDENT), any(Instant.class)))
+                    .thenReturn(1L);
+            when(reviews.findByStudentHashAndProfessorIdAndCourseId(STUDENT, "p1", "c1"))
+                    .thenReturn(Optional.empty());
+            when(reviews.save(any(Review.class))).thenAnswer(inv -> {
+                Review r = inv.getArgument(0);
+                if (r.getId() == null) r.setId("rev-1");
+                return r;
+            });
+            when(moderation.moderate(anyString(), anyString(), anyString()))
+                    .thenReturn(new ModerationResult(ModerationVerdict.APPROVE, List.of(), null, "ok", 0.9, "m", 1));
+
+            assertThat(service.submit(STUDENT, validRequest()).outcome())
+                    .isEqualTo(ReviewStatus.PUBLISHED);
+        }
+
+        @Test
+        @DisplayName("a limit of 0 disables the cap")
+        void zeroDisables() {
+            when(rateLimit.reviewsPerHour()).thenReturn(0);
+            when(professors.findById("p1")).thenReturn(Optional.of(professor));
+            when(courses.findById("c1")).thenReturn(Optional.of(course));
+            when(reviews.findByStudentHashAndProfessorIdAndCourseId(STUDENT, "p1", "c1"))
+                    .thenReturn(Optional.empty());
+            when(reviews.save(any(Review.class))).thenAnswer(inv -> {
+                Review r = inv.getArgument(0);
+                if (r.getId() == null) r.setId("rev-1");
+                return r;
+            });
+            when(moderation.moderate(anyString(), anyString(), anyString()))
+                    .thenReturn(new ModerationResult(ModerationVerdict.APPROVE, List.of(), null, "ok", 0.9, "m", 1));
+
+            service.submit(STUDENT, validRequest());
+
+            verify(reviews, never()).countByStudentHashAndUpdatedAtAfter(anyString(), any(Instant.class));
         }
     }
 }

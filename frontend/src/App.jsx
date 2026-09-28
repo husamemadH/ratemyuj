@@ -1,168 +1,16 @@
 import { useState, useEffect, useRef } from "react";
+import { apiGet, apiSend } from "./api";
+import { C, display, body, reviewsWord, Stars, GRADES, gradeLabel } from "./ui";
+import Admin from "./Admin";
 
 /* ============================================================
    قيّم دكتورك — RateMyUjProfessor (النسخة العربية RTL)
-   ملاحظات الربط: ابحث عن تعليقات "API:" — كل نداء شبكة
-   في قسم MOCK API أدناه يذكر نقطة النهاية الحقيقية في Spring Boot.
+   متصل بالباك إند: Spring Boot + PostgreSQL + فحص Jev.
    ============================================================ */
 
-const C = {
-  pine: "#0C3B2E",   // الترويسة والأزرار الأساسية
-  meadow: "#1E7A5F", // اللمسات وحالات القبول
-  chalk: "#F5F4EF",  // خلفية الصفحة
-  ink: "#1A211D",    // النص
-  amber: "#D9A62E",  // النجوم
-  brick: "#B2402F",  // حالات الرفض
-  mist: "#DDE3DD",   // الخطوط الفاصلة
-};
+const PAGE_SIZE = 10;
 
-const display = { fontFamily: "'Noto Kufi Arabic', 'IBM Plex Sans Arabic', sans-serif" };
-const body = { fontFamily: "'IBM Plex Sans Arabic', 'Noto Kufi Arabic', system-ui, sans-serif" };
-
-/* صيغة الجمع العربية لكلمة تقييم */
-const reviewsWord = (n) => {
-  if (n === 0) return "بدون تقييمات";
-  if (n === 1) return "تقييم واحد";
-  if (n === 2) return "تقييمان";
-  if (n <= 10) return `${n} تقييمات`;
-  return `${n} تقييم`;
-};
-
-/* ---------------- بيانات تجريبية (تُستبدل بالـ API) ---------------- */
-
-const COURSES = {
-  cs101: { id: "cs101", code: "CS101", name: "مقدمة في البرمجة" },
-  cs211: { id: "cs211", code: "CS211", name: "هياكل البيانات" },
-  cs317: { id: "cs317", code: "CS317", name: "أنظمة التشغيل" },
-  math101: { id: "math101", code: "MATH101", name: "تفاضل وتكامل ١" },
-  cs452: { id: "cs452", code: "CS452", name: "تعلّم الآلة" },
-};
-
-const PROFESSORS = [
-  {
-    id: "p1",
-    title: "د.",
-    fullName: "خالد منصور",
-    department: "علم الحاسوب",
-    college: "كلية الملك عبدالله الثاني لتكنولوجيا المعلومات",
-    avgRating: 4.3,
-    reviewCount: 27,
-    breakdown: { 5: 14, 4: 8, 3: 3, 2: 1, 1: 1 },
-    courseIds: ["cs101", "cs211"],
-  },
-  {
-    id: "p2",
-    title: "أ.د.",
-    fullName: "رانيا التل",
-    department: "علم الحاسوب",
-    college: "كلية الملك عبدالله الثاني لتكنولوجيا المعلومات",
-    avgRating: 3.6,
-    reviewCount: 41,
-    breakdown: { 5: 10, 4: 12, 3: 12, 2: 4, 1: 3 },
-    courseIds: ["cs317", "cs452"],
-  },
-  {
-    id: "p3",
-    title: "د.",
-    fullName: "عمر حدادين",
-    department: "الرياضيات",
-    college: "كلية العلوم",
-    avgRating: 0,
-    reviewCount: 0,
-    breakdown: { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 },
-    courseIds: ["math101"],
-  },
-];
-
-const SEED_REVIEWS = {
-  p1: [
-    {
-      id: "r1", rating: 5, grade: "A_MINUS", courseCode: "CS211", courseName: "هياكل البيانات",
-      difficulty: 4, wouldTakeAgain: true, createdAt: "2026-05-20",
-      comment: "المحاضرات مرتّبة جداً وبنزّل كل شي على الإيليرنينغ. الامتحانات عادلة بس لازم تحلّ أسئلة الشيتات — الأسئلة بتيجي منها حرفياً.",
-    },
-    {
-      id: "r2", rating: 4, grade: "B_PLUS", courseCode: "CS101", courseName: "مقدمة في البرمجة",
-      difficulty: 2, wouldTakeAgain: true, createdAt: "2026-04-11",
-      comment: "El doctor sharho wadeh w bes2al kteer bel lecture, el 7odoor bya5od 3alamat. المشروع أكبر جزء من العلامة فابلّش فيه بدري.",
-    },
-  ],
-  p2: [
-    {
-      id: "r3", rating: 3, grade: "C_PLUS", courseCode: "CS317", courseName: "أنظمة التشغيل",
-      difficulty: 5, wouldTakeAgain: false, createdAt: "2026-06-02",
-      comment: "فاهمة المادة بعمق بس بتمشي بسرعة وبتفترض إنك متمكّن من C من قبل. الميد كان أصعب بكثير من الأمثلة. ساعات المكتب بتفيد كثير — روحوا عليها.",
-    },
-  ],
-  p3: [],
-};
-
-/* ---------------- MOCK API ----------------
-   API: POST /api/reviews
-   في الباك إند الحقيقي يمرّ التعليق على فحص OpenRouter ويرجع
-   ReviewSubmissionResponse { reviewId, outcome, feedback, flaggedCategories }.
-   هذا المحاكي يمثّل النتائج بقواعد بسيطة + تأخير شبكة. */
-function mockSubmitReview({ comment }) {
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      const text = comment.toLowerCase();
-      const profanity = ["stupid", "idiot", "trash", "غبي", "حمار", "زبالة", "بكرهه", "kalb", "7mar"];
-      const hit = profanity.find((w) => text.includes(w));
-      if (hit) {
-        resolve({
-          outcome: "REJECTED",
-          feedback:
-            "تعليقك فيه هجوم شخصي. خلّي كلامك عن التدريس نفسه — شو اللي كان صعب أو غير عادل بالمحاضرات أو الامتحانات أو العلامات؟ عدّله وبينشر عادي.",
-          flaggedCategories: ["PERSONAL_ATTACK"],
-        });
-      } else if (comment.trim().length < 40) {
-        resolve({
-          outcome: "REJECTED",
-          feedback:
-            "التعليق قصير كثير وما رح يفيد باقي الطلاب. ضيف تفصيلة وحدة ملموسة — كيف كانت الامتحانات أو العلامات أو المحاضرات؟",
-          flaggedCategories: ["NOT_CONSTRUCTIVE"],
-        });
-      } else {
-        resolve({ outcome: "PUBLISHED", feedback: null, flaggedCategories: [] });
-      }
-    }, 2600);
-  });
-}
-
-/* ---------------- مكوّنات صغيرة ---------------- */
-
-function Stars({ value, size = 16, onSet, hover, onHover }) {
-  const active = hover || value;
-  return (
-    <div className="flex gap-0.5" onMouseLeave={() => onHover && onHover(0)}>
-      {[1, 2, 3, 4, 5].map((i) => (
-        <svg
-          key={i}
-          width={size}
-          height={size}
-          viewBox="0 0 24 24"
-          onClick={() => onSet && onSet(i)}
-          onMouseEnter={() => onHover && onHover(i)}
-          className={onSet ? "cursor-pointer" : ""}
-          fill={i <= active ? C.amber : "none"}
-          stroke={i <= active ? C.amber : C.mist}
-          strokeWidth="2"
-        >
-          <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
-        </svg>
-      ))}
-    </div>
-  );
-}
-
-const GRADES = [
-  ["A", "A"], ["A_MINUS", "A−"], ["B_PLUS", "B+"], ["B", "B"], ["B_MINUS", "B−"],
-  ["C_PLUS", "C+"], ["C", "C"], ["C_MINUS", "C−"], ["D_PLUS", "D+"], ["D", "D"],
-  ["F", "F"], ["WITHDRAWN", "W"], ["IN_PROGRESS", "…"],
-];
-const gradeLabel = (g) => (GRADES.find(([k]) => k === g) || ["", g])[1];
-
-/* ---------------- لوحة فحص الذكاء الاصطناعي (العنصر المميّز) ----------------
+/* ---------------- لوحة فحص الجودة ----------------
    تظهر أثناء POST /api/reviews ثم تعرض النتيجة. */
 
 const CHECKS = [
@@ -170,6 +18,13 @@ const CHECKS = [
   { key: "fair", label: "منصف وواقعي" },
   { key: "useful", label: "مفيد لباقي الطلاب" },
 ];
+
+function failIndex(result) {
+  const cat = (result.flaggedCategories || [])[0];
+  if (cat === "PROFANITY" || cat === "PERSONAL_ATTACK" || cat === "DISCRIMINATION") return 0;
+  if (cat === "UNSUBSTANTIATED_ACCUSATION" || cat === "PRIVATE_INFO") return 1;
+  return 2;
+}
 
 function ModerationPanel({ phase, result, onEdit, onDone }) {
   const [step, setStep] = useState(0);
@@ -191,7 +46,7 @@ function ModerationPanel({ phase, result, onEdit, onDone }) {
         <span className="inline-block w-2 h-2 rounded-full"
           style={{ background: done ? (rejected ? C.brick : C.amber) : C.amber, animation: done ? "none" : "pulse 1s infinite" }} />
         <p className="text-xs font-medium" style={display}>
-          {done ? "اكتمل فحص التقييم" : "الذكاء الاصطناعي يقرأ تقييمك الآن…"}
+          {done ? "اكتمل فحص التقييم" : "نفحص تقييمك الآن…"}
         </p>
       </div>
 
@@ -253,16 +108,10 @@ function ModerationPanel({ phase, result, onEdit, onDone }) {
     </div>
   );
 }
-function failIndex(result) {
-  const cat = result.flaggedCategories[0];
-  if (cat === "PROFANITY" || cat === "PERSONAL_ATTACK" || cat === "DISCRIMINATION") return 0;
-  if (cat === "UNSUBSTANTIATED_ACCUSATION" || cat === "PRIVATE_INFO") return 1;
-  return 2;
-}
 
 /* ---------------- نموذج التقييم ---------------- */
 
-function ReviewForm({ professor, onPublished, onClose }) {
+function ReviewForm({ professor, onRequireAuth, onPublished, onClose }) {
   const [courseId, setCourseId] = useState("");
   const [grade, setGrade] = useState("");
   const [rating, setRating] = useState(0);
@@ -272,32 +121,36 @@ function ReviewForm({ professor, onPublished, onClose }) {
   const [comment, setComment] = useState("");
   const [phase, setPhase] = useState("form"); // form | checking | done
   const [result, setResult] = useState(null);
+  const [error, setError] = useState("");
   const panelRef = useRef(null);
 
   const ready = courseId && grade && rating > 0 && comment.trim().length >= 20;
 
   const submit = async () => {
+    setError("");
     setPhase("checking");
     setTimeout(() => panelRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
-    /* API: POST /api/reviews  (بتوثيق JWT)
-       body: { professorId, courseId, rating, comment, grade, difficulty, wouldTakeAgain } */
-    /* When this calls the API, use credentials: "include" and do not send X-Student-Hash. */
-    const res = await mockSubmitReview({ comment });
-    setResult(res);
-    setPhase("done");
+    try {
+      const body = await apiSend("/api/reviews", "POST", {
+        professorId: professor.id,
+        courseId,
+        rating,
+        comment: comment.trim(),
+        grade,
+        difficulty: difficulty || null,
+        wouldTakeAgain: wta,
+      });
+      setResult(body);
+      setPhase("done");
+    } catch (requestError) {
+      if (requestError.status === 401) onRequireAuth();
+      setError(requestError.message);
+      setPhase("form");
+    }
   };
 
   const finish = () => {
-    if (result.outcome === "PUBLISHED") {
-      const course = COURSES[courseId];
-      onPublished({
-        id: "new-" + Date.now(), rating, grade,
-        courseCode: course.code, courseName: course.name,
-        difficulty: difficulty || null, wouldTakeAgain: wta,
-        createdAt: new Date().toISOString().slice(0, 10),
-        comment: comment.trim(), mine: true,
-      });
-    }
+    if (result.outcome === "PUBLISHED") onPublished();
     onClose();
   };
 
@@ -307,7 +160,7 @@ function ReviewForm({ professor, onPublished, onClose }) {
         <div>
           <h3 className="text-lg font-semibold" style={display}>قيّم {professor.title} {professor.fullName}</h3>
           <p className="text-xs mt-1" style={{ color: "#5C6A61" }}>
-            مجهول الهوية للجميع · تقييم واحد لكل مادة · يُفحص بالذكاء الاصطناعي قبل النشر
+            مجهول الهوية للجميع · تقييم واحد لكل مادة · يُفحص آلياً قبل النشر
           </p>
         </div>
         <button onClick={onClose} className="text-sm px-2 py-1 rounded hover:bg-gray-100">✕</button>
@@ -318,16 +171,16 @@ function ReviewForm({ professor, onPublished, onClose }) {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium mb-2" style={{ color: "#5C6A61" }}>
-                المادة — تُجلب تلقائياً من ملف الدكتور
+                المادة — من ملف الدكتور
               </label>
               <div className="flex flex-wrap gap-2">
-                {professor.courseIds.map((cid) => (
-                  <button key={cid} onClick={() => setCourseId(cid)}
+                {professor.courses.map((course) => (
+                  <button key={course.id} onClick={() => setCourseId(course.id)}
                     className="px-3 py-1.5 rounded-full text-sm"
-                    style={courseId === cid
+                    style={courseId === course.id
                       ? { background: C.pine, color: "white" }
                       : { border: `1px solid ${C.mist}`, color: C.ink }}>
-                    <span dir="ltr">{COURSES[cid].code}</span>
+                    <span dir="ltr">{course.code}</span>
                   </button>
                 ))}
               </div>
@@ -410,6 +263,8 @@ function ReviewForm({ professor, onPublished, onClose }) {
             </div>
           </div>
 
+          {error && <p className="text-sm" style={{ color: C.brick }}>{error}</p>}
+
           <button
             disabled={!ready}
             onClick={submit}
@@ -449,28 +304,76 @@ function BreakdownBar({ label, count, total }) {
   );
 }
 
-function Profile({ professor, onBack, signedIn, authReady, onRequireAuth }) {
-  const [reviews, setReviews] = useState(SEED_REVIEWS[professor.id] || []);
+function Profile({ professorId, onBack, signedIn, authReady, onRequireAuth }) {
+  const [professor, setProfessor] = useState(null);
+  const [reviews, setReviews] = useState([]);
+  const [status, setStatus] = useState("loading"); // loading | ready | error
+  const [error, setError] = useState("");
   const [writing, setWriting] = useState(false);
-  const [stats, setStats] = useState({
-    avg: professor.avgRating, count: professor.reviewCount, breakdown: { ...professor.breakdown },
-  });
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+
+  const load = async () => {
+    setStatus("loading");
+    setError("");
+    try {
+      const [detail, reviewPage] = await Promise.all([
+        apiGet(`/api/professors/${professorId}`),
+        apiGet(`/api/professors/${professorId}/reviews?page=0&size=${PAGE_SIZE}`),
+      ]);
+      setProfessor(detail);
+      setReviews(reviewPage.content || []);
+      setPage(0);
+      setHasMore(!reviewPage.last);
+      setStatus("ready");
+    } catch (loadError) {
+      setError(loadError.message);
+      setStatus("error");
+    }
+  };
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [professorId]);
 
   useEffect(() => {
     if (!signedIn) setWriting(false);
   }, [signedIn]);
 
-  /* API: GET /api/professors/{id}  +  GET /api/professors/{id}/reviews */
-
-  const publish = (review) => {
-    setReviews([{ ...review }, ...reviews]);
-    setStats((s) => {
-      const breakdown = { ...s.breakdown, [review.rating]: s.breakdown[review.rating] + 1 };
-      const count = s.count + 1;
-      const sum = Object.entries(breakdown).reduce((a, [star, n]) => a + star * n, 0);
-      return { avg: Math.round((sum / count) * 10) / 10, count, breakdown };
-    });
+  const loadMore = async () => {
+    const next = page + 1;
+    try {
+      const data = await apiGet(`/api/professors/${professorId}/reviews?page=${next}&size=${PAGE_SIZE}`);
+      setReviews((current) => [...current, ...(data.content || [])]);
+      setPage(next);
+      setHasMore(!data.last);
+    } catch (loadError) {
+      setError(loadError.message);
+    }
   };
+
+  if (status === "loading") {
+    return (
+      <div className="max-w-3xl mx-auto px-4 py-16 text-center text-sm" style={{ color: "#5C6A61" }}>
+        لحظات… نحمّل الملف
+      </div>
+    );
+  }
+
+  if (status === "error" || !professor) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 py-16 text-center">
+        <p className="text-sm mb-3" style={{ color: C.brick }}>{error || "تعذّر تحميل الملف"}</p>
+        <button onClick={load} className="text-sm px-4 py-2 rounded-lg" style={{ border: `1px solid ${C.mist}` }}>
+          حاول مرة ثانية
+        </button>
+      </div>
+    );
+  }
+
+  const count = professor.reviewCount;
+  const breakdown = professor.breakdown || {};
 
   return (
     <div className="max-w-3xl mx-auto px-4 pb-16">
@@ -488,10 +391,10 @@ function Profile({ professor, onBack, signedIn, authReady, onRequireAuth }) {
               {professor.title} {professor.fullName}
             </h1>
             <div className="flex flex-wrap gap-2 mt-3">
-              {professor.courseIds.map((cid) => (
-                <span key={cid} className="px-2.5 py-1 rounded-full text-xs"
+              {professor.courses.map((course) => (
+                <span key={course.id} className="px-2.5 py-1 rounded-full text-xs"
                   style={{ background: C.chalk, border: `1px solid ${C.mist}` }}>
-                  <span dir="ltr">{COURSES[cid].code}</span> · {COURSES[cid].name}
+                  <span dir="ltr">{course.code}</span> · {course.name}
                 </span>
               ))}
             </div>
@@ -509,18 +412,18 @@ function Profile({ professor, onBack, signedIn, authReady, onRequireAuth }) {
           <div className="md:w-64 shrink-0">
             <div className="flex items-end gap-2">
               <span className="text-6xl font-bold leading-none" style={{ ...display, color: C.pine }} dir="ltr">
-                {stats.count ? stats.avg.toFixed(1) : "—"}
+                {count ? professor.avgRating.toFixed(1) : "—"}
               </span>
               <div className="pb-1.5">
-                <Stars value={Math.round(stats.avg)} size={14} />
+                <Stars value={Math.round(professor.avgRating)} size={14} />
                 <p className="text-xs mt-1" style={{ color: "#8A968D" }}>
-                  {reviewsWord(stats.count)}
+                  {reviewsWord(count)}
                 </p>
               </div>
             </div>
             <div className="mt-3 space-y-1.5">
               {[5, 4, 3, 2, 1].map((s) => (
-                <BreakdownBar key={s} label={s} count={stats.breakdown[s]} total={stats.count} />
+                <BreakdownBar key={s} label={s} count={breakdown[String(s)] || 0} total={count} />
               ))}
             </div>
           </div>
@@ -529,7 +432,12 @@ function Profile({ professor, onBack, signedIn, authReady, onRequireAuth }) {
 
       {writing && (
         <div className="mb-4">
-          <ReviewForm professor={professor} onPublished={publish} onClose={() => setWriting(false)} />
+          <ReviewForm
+            professor={professor}
+            onRequireAuth={onRequireAuth}
+            onPublished={load}
+            onClose={() => setWriting(false)}
+          />
         </div>
       )}
 
@@ -566,11 +474,20 @@ function Profile({ professor, onBack, signedIn, authReady, onRequireAuth }) {
                     تقييمك
                   </span>
                 )}
-                <span className="text-xs ms-auto" style={{ color: "#B0BAB2" }} dir="ltr">{r.createdAt}</span>
+                <span className="text-xs ms-auto" style={{ color: "#B0BAB2" }} dir="ltr">
+                  {String(r.createdAt || "").slice(0, 10)}
+                </span>
               </div>
               <p className="text-sm leading-relaxed">{r.comment}</p>
             </div>
           ))}
+          {hasMore && (
+            <button onClick={loadMore}
+              className="w-full py-3 rounded-2xl text-sm font-medium"
+              style={{ border: `1px solid ${C.mist}`, color: C.meadow }}>
+              عرض المزيد
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -581,14 +498,27 @@ function Profile({ professor, onBack, signedIn, authReady, onRequireAuth }) {
 
 function Home({ onOpen }) {
   const [q, setQ] = useState("");
-  /* API: GET /api/professors?q=&page=&size= */
-  const query = q.trim().toLowerCase();
-  const results = PROFESSORS.filter(
-    (p) =>
-      p.fullName.includes(q.trim()) ||
-      p.department.includes(q.trim()) ||
-      p.courseIds.some((c) => COURSES[c].code.toLowerCase().includes(query))
-  );
+  const [results, setResults] = useState([]);
+  const [status, setStatus] = useState("loading"); // loading | ready | error
+
+  useEffect(() => {
+    let cancelled = false;
+    setStatus("loading");
+    const timer = setTimeout(() => {
+      apiGet(`/api/professors?q=${encodeURIComponent(q.trim())}&size=30`)
+        .then((data) => {
+          if (cancelled) return;
+          setResults(data.content || []);
+          setStatus("ready");
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setResults([]);
+          setStatus("error");
+        });
+    }, 250);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [q]);
 
   return (
     <div>
@@ -609,7 +539,7 @@ function Home({ onOpen }) {
           />
         </div>
         <p className="text-xs mt-4" style={{ color: "#7FA890" }}>
-          لطلبة الأردنية الموثّقين فقط · التقييمات مجهولة الهوية · كل تعليق يُفحص بالذكاء الاصطناعي
+          لطلبة الأردنية الموثّقين فقط · التقييمات مجهولة الهوية · كل تعليق يُفحص آلياً
         </p>
       </div>
 
@@ -629,13 +559,22 @@ function Home({ onOpen }) {
             <div className="min-w-0">
               <p className="font-semibold truncate" style={display}>{p.title} {p.fullName}</p>
               <p className="text-xs truncate" style={{ color: "#5C6A61" }}>
-                {p.department} · <span dir="ltr">{p.courseIds.map((c) => COURSES[c].code).join(", ")}</span>
+                {p.department}
+                {p.courseCodes?.length ? <> · <span dir="ltr">{p.courseCodes.join(", ")}</span></> : null}
               </p>
             </div>
             <span className="ms-auto" style={{ color: C.meadow }}>←</span>
           </button>
         ))}
-        {results.length === 0 && (
+        {status === "loading" && results.length === 0 && (
+          <div className="text-center py-10 text-sm" style={{ color: "#5C6A61" }}>لحظات…</div>
+        )}
+        {status === "error" && (
+          <div className="text-center py-10 text-sm" style={{ color: C.brick }}>
+            تعذّر الاتصال بالخادم. تأكد إن الباك إند شغّال.
+          </div>
+        )}
+        {status === "ready" && results.length === 0 && (
           <div className="text-center py-10 text-sm" style={{ color: "#5C6A61" }}>
             لا يوجد دكتور يطابق «{q}». جرّب اسماً آخر أو ابحث برمز المادة.
           </div>
@@ -779,10 +718,32 @@ function LoginPanel({ onClose, onSuccess }) {
 /* ---------------- هيكل التطبيق ---------------- */
 
 export default function App() {
-  const [view, setView] = useState({ page: "home", profId: null });
+  const isAdminHash = () => window.location.hash === "#/admin";
+  const [view, setView] = useState(() => ({ page: isAdminHash() ? "admin" : "home", profId: null }));
   const [auth, setAuth] = useState("unknown");
   const [showLogin, setShowLogin] = useState(false);
-  const professor = PROFESSORS.find((p) => p.id === view.profId);
+
+  useEffect(() => {
+    const onHash = () => {
+      setView((current) => isAdminHash()
+        ? { page: "admin", profId: null }
+        : current.page === "admin"
+          ? { page: "home", profId: null }
+          : current);
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  const openAdmin = () => {
+    window.location.hash = "#/admin";
+    setView({ page: "admin", profId: null });
+  };
+
+  const goHome = () => {
+    if (isAdminHash()) window.location.hash = "";
+    setView({ page: "home", profId: null });
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -819,38 +780,47 @@ export default function App() {
 
       <header className="px-4 py-3 flex items-center justify-between"
         style={{ background: C.pine, borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
-        <button onClick={() => setView({ page: "home", profId: null })}
+        <button onClick={goHome}
           className="text-white font-bold text-sm" style={display}>
           قيّم <span style={{ color: C.amber }}>دكتورك</span>
         </button>
-        {auth === "unknown" ? (
-          <span className="text-xs px-2.5 py-1 rounded-full" style={{ visibility: "hidden" }}>دخول</span>
-        ) : auth === "authenticated" ? (
-          <span className="flex items-center gap-2">
-            <span className="text-xs px-2.5 py-1 rounded-full"
-              style={{ background: "rgba(255,255,255,0.1)", color: "#CFE8D8" }}>
-              موثّق
-            </span>
-            <button onClick={logout} className="text-xs" style={{ color: "#CFE8D8" }}>خروج</button>
-          </span>
-        ) : (
-          <button onClick={() => setShowLogin(true)}
+        <span className="flex items-center gap-2">
+          <button onClick={openAdmin}
             className="text-xs px-2.5 py-1 rounded-full"
             style={{ background: "rgba(255,255,255,0.1)", color: "#CFE8D8" }}>
-            دخول
+            الإدارة
           </button>
-        )}
+          {auth === "unknown" ? (
+            <span className="text-xs px-2.5 py-1 rounded-full" style={{ visibility: "hidden" }}>دخول</span>
+          ) : auth === "authenticated" ? (
+            <span className="flex items-center gap-2">
+              <span className="text-xs px-2.5 py-1 rounded-full"
+                style={{ background: "rgba(255,255,255,0.1)", color: "#CFE8D8" }}>
+                موثّق
+              </span>
+              <button onClick={logout} className="text-xs" style={{ color: "#CFE8D8" }}>خروج</button>
+            </span>
+          ) : (
+            <button onClick={() => setShowLogin(true)}
+              className="text-xs px-2.5 py-1 rounded-full"
+              style={{ background: "rgba(255,255,255,0.1)", color: "#CFE8D8" }}>
+              دخول
+            </button>
+          )}
+        </span>
       </header>
 
-      {view.page === "home"
-        ? <Home onOpen={(id) => setView({ page: "prof", profId: id })} />
-        : <Profile
-            professor={professor}
-            onBack={() => setView({ page: "home", profId: null })}
-            signedIn={auth === "authenticated"}
-            authReady={auth !== "unknown"}
-            onRequireAuth={() => setShowLogin(true)}
-          />}
+      {view.page === "home" && <Home onOpen={(id) => setView({ page: "prof", profId: id })} />}
+      {view.page === "prof" && (
+        <Profile
+          professorId={view.profId}
+          onBack={() => setView({ page: "home", profId: null })}
+          signedIn={auth === "authenticated"}
+          authReady={auth !== "unknown"}
+          onRequireAuth={() => setShowLogin(true)}
+        />
+      )}
+      {view.page === "admin" && <Admin onBack={goHome} />}
       {showLogin && (
         <LoginPanel
           onClose={() => setShowLogin(false)}

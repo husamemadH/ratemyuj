@@ -23,6 +23,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
+import com.ratemyuj.config.AdminProperties;
 import com.ratemyuj.config.AuthProperties;
 
 import java.util.List;
@@ -46,14 +47,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @WebMvcTest(controllers = {AuthController.class, ReviewController.class})
 @Import({SecurityConfig.class, EmailPolicy.class, AuthCookie.class})
-@EnableConfigurationProperties(AuthProperties.class)
+@EnableConfigurationProperties({AuthProperties.class, AdminProperties.class})
 @TestPropertySource(properties = {
         "JWT_SECRET=0123456789abcdef0123456789abcdef",
         "app.auth.jwt-secret=0123456789abcdef0123456789abcdef",
         "app.auth.jwt-ttl=7d",
         "app.auth.cookie-name=session",
         "app.auth.cookie-secure=true",
-        "app.auth.mail-mode=log"
+        "app.auth.mail-mode=log",
+        "app.admin.api-key=test-admin-key"
 })
 class AuthSecurityTest {
 

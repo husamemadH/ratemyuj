@@ -1,13 +1,13 @@
 package com.ratemyuj.repository;
 
 import com.ratemyuj.domain.OtpChallenge;
-import org.springframework.data.mongodb.repository.MongoRepository;
+import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
-public interface OtpChallengeRepository extends MongoRepository<OtpChallenge, String> {
+public interface OtpChallengeRepository extends JpaRepository<OtpChallenge, String> {
 
     long countByEmailAndCreatedAtAfter(String email, Instant createdAt);
 
@@ -17,4 +17,6 @@ public interface OtpChallengeRepository extends MongoRepository<OtpChallenge, St
             String email, Instant codeExpiresAt);
 
     List<OtpChallenge> findByEmailAndConsumedFalse(String email);
+
+    long deleteByExpiresAtBefore(Instant cutoff);
 }
